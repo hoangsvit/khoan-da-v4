@@ -32,7 +32,6 @@ export interface ExtractedSignals {
     threatOrExtortion?: boolean;
   };
   rawSummary: string;
-  // 100% AI Analysis Fields
   scamCategory?: string;
   aiDetailedReasoning?: string;
   aiRiskLevel?: RiskLevel;
@@ -41,7 +40,7 @@ export interface ExtractedSignals {
   aiRiskScoreDescription?: string;
   aiReasons?: string[];
   aiActionSteps?: string[];
-  analysisEngine?: 'GEMINI_AI_100' | 'LOCAL_FALLBACK';
+  analysisEngine?: 'GEMINI_AI_100';
 }
 
 export interface RiskAnalysisResult {
@@ -68,10 +67,20 @@ export interface RiskAnalysisResult {
   urlCheckSignals: URLCheckSignal[];
   extractedSignals: ExtractedSignals;
   disclaimer: string;
-  // 100% AI Indicators
   scamCategory?: string;
   aiDetailedReasoning?: string;
-  analysisEngine: 'GEMINI_AI_100' | 'LOCAL_FALLBACK';
+  analysisEngine: 'GEMINI_AI_100';
+}
+
+const RISK_RANK: Record<RiskLevel, number> = {
+  NO_CLEAR_RISK: 0,
+  VERIFY: 1,
+  CAUTION: 2,
+  STOP: 3
+};
+
+function maxRiskLevel(a: RiskLevel, b: RiskLevel): RiskLevel {
+  return RISK_RANK[a] >= RISK_RANK[b] ? a : b;
 }
 
 export function computeRiskAnalysis(
@@ -80,90 +89,44 @@ export function computeRiskAnalysis(
   safeBrowsing: SafeBrowsingResult,
   userText: string
 ): RiskAnalysisResult {
-  let reasons: string[] = extracted.aiReasons && extracted.aiReasons.length > 0
-    ? [...extracted.aiReasons]
-    : [];
+  const urlCheckSignals = urls.map(url => analyzeUrl(url));
 
-  let actionSteps: string[] = extracted.aiActionSteps && extracted.aiActionSteps.length > 0
-    ? [...extracted.aiActionSteps]
-    : [];
+  // Local code is deliberately limited to technical verification.
+  // It must not generate consumer-facing explanations or recommendations.
+  const matchResult = matchInstitutionInText(extracted.claimedInstitution || userText);
+  const matchedInst: Institution | undefined = matchResult?.entity;
 
   let detectedBrandMismatch = false;
   let mismatchDetails: RiskAnalysisResult['mismatchDetails'];
 
-  // Analyze all extracted URLs
-  const urlCheckSignals = urls.map(url => analyzeUrl(url));
-
-  // Secondary Check: Match institution in claimedInstitution or full user text against SBV Bank Registry
-  const matchResult = matchInstitutionInText(extracted.claimedInstitution || userText);
-  let matchedInst: Institution | undefined = matchResult?.entity;
-
-  // Secondary Check: Brand / Domain Mismatch
   if (matchedInst && matchedInst.verification === 'first_party_verified' && urlCheckSignals.length > 0) {
     for (const urlSig of urlCheckSignals) {
-      if (urlSig.domain) {
-        const isVerified = isDomainVerifiedForEntity(urlSig.domain, matchedInst);
-        if (!isVerified) {
-          detectedBrandMismatch = true;
-          mismatchDetails = {
-            claimedEntity: matchedInst.name,
-            officialDomains: matchedInst.domains,
-            providedDomain: urlSig.domain
-          };
-          const mismatchReason = `CẢNH BÁO GIẢ MẠO THƯƠNG HIỆU: Tin nhắn/nội dung xưng danh "${matchedInst.name}" nhưng đường dẫn "${urlSig.domain}" KHÔNG thuộc danh sách tên miền chính thức công khai của Ngân hàng Nhà nước (${matchedInst.domains.join(', ')}).`;
-          if (!reasons.some(r => r.includes(urlSig.domain))) {
-            reasons.unshift(mismatchReason);
-          }
-          break;
-        }
+      if (!urlSig.domain) continue;
+
+      const isVerified = isDomainVerifiedForEntity(urlSig.domain, matchedInst);
+      if (!isVerified) {
+        detectedBrandMismatch = true;
+        mismatchDetails = {
+          claimedEntity: matchedInst.name,
+          officialDomains: matchedInst.domains,
+          providedDomain: urlSig.domain
+        };
+        break;
       }
     }
   }
 
-  // Secondary Check: Safe Browsing threat
-  if (safeBrowsing.hasMatch) {
-    const sbReason = `CẢNH BÁO MÃ ĐỘC (Google Safe Browsing): Phát hiện liên kết độc hại trong danh sách đen an toàn: ${safeBrowsing.matches.join(', ')}.`;
-    if (!reasons.some(r => r.includes('Safe Browsing'))) {
-      reasons.unshift(sbReason);
-    }
+  let riskLevel: RiskLevel = extracted.aiRiskLevel || 'VERIFY';
+
+  if (detectedBrandMismatch || safeBrowsing.hasMatch) {
+    riskLevel = maxRiskLevel(riskLevel, 'STOP');
   }
-
-  // Primary AI Risk Level
-  let riskLevel: RiskLevel = extracted.aiRiskLevel || 'STOP';
-  if ((detectedBrandMismatch || safeBrowsing.hasMatch) && riskLevel !== 'STOP') {
-    riskLevel = 'STOP';
-  }
-
-  const headlineTitle = extracted.aiHeadlineTitle || (riskLevel === 'STOP' ? 'CẢNH BÁO BỞI GEMINI AI: NGUY HIỂM LỢI DỤNG!' : 'CẢNH BÁO BỞI GEMINI AI');
-  const headlineSubtitle = extracted.aiHeadlineSubtitle || 'Phân tích 100% bằng Trí tuệ Nhân tạo Multimodal Gemini AI.';
-  const riskScoreDescription = extracted.aiRiskScoreDescription || `Phân tích 100% bởi Gemini AI (${riskLevel})`;
-
-  // Ensure minimum default action steps if none provided
-  if (actionSteps.length === 0) {
-    if (riskLevel === 'STOP') {
-      actionSteps.push('NGƯNG GIAO DỊCH VÀ KHÔNG BẤM VÀO BẤT KỲ LIÊN KẾT NÀO.');
-      actionSteps.push('Tuyệt đối KHÔNG nhập OTP, Mật khẩu hoặc Số thẻ ngân hàng.');
-      actionSteps.push('Nếu bị đe dọa hoặc tống tiền, hãy báo ngay cho Cơ quan Công an gần nhất.');
-    } else if (riskLevel === 'CAUTION') {
-      actionSteps.push('Xác minh lại danh tính người gửi qua kênh liên lạc chính thức khác.');
-      actionSteps.push('Không chuyển tiền cho tài khoản cá nhân lạ.');
-    } else {
-      actionSteps.push('Vẫn luôn cẩn trọng trước khi giao dịch hoặc cung cấp thông tin cá nhân.');
-    }
-  }
-
-  if (matchedInst && !actionSteps.some(s => s.includes(matchedInst.name))) {
-    actionSteps.push(`Liên hệ tổng đài hoặc trang web chính thức của ${matchedInst.name} để kiểm tra đối soát.`);
-  }
-
-  const disclaimer =
-    'Kết quả được phân tích 100% bằng Trí Tuệ Nhân Tạo Multimodal Gemini AI, kết hợp kiểm định đối soát phụ từ Cơ sở dữ liệu Ngân hàng Nhà nước VN & Google Safe Browsing API.';
 
   return {
     riskLevel,
-    headlineTitle,
-    headlineSubtitle,
-    riskScoreDescription,
+    headlineTitle: extracted.aiHeadlineTitle || '',
+    headlineSubtitle: extracted.aiHeadlineSubtitle || '',
+    riskScoreDescription: extracted.aiRiskScoreDescription || '',
     scamCategory: extracted.scamCategory,
     aiDetailedReasoning: extracted.aiDetailedReasoning,
     analysisEngine: 'GEMINI_AI_100',
@@ -175,11 +138,11 @@ export function computeRiskAnalysis(
       verification: matchedInst.verification,
       officialDomains: matchedInst.domains
     } : undefined,
-    reasons,
-    actionSteps,
+    reasons: [...(extracted.aiReasons || [])],
+    actionSteps: [...(extracted.aiActionSteps || [])],
     safeBrowsingStatus: safeBrowsing,
     urlCheckSignals,
     extractedSignals: extracted,
-    disclaimer
+    disclaimer: 'Kết quả hỗ trợ nhận diện rủi ro và không phải là bảo đảm tuyệt đối về độ an toàn của nội dung.'
   };
 }
