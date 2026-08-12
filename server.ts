@@ -4,12 +4,12 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { getRegistryStats } from './server/registry';
 import { extractSignalsFromInput, generateFinalConsumerResponse } from './server/geminiExtractor';
+import { detectConsumerModeWithGemini } from './server/geminiModeDetector';
 import { checkSafeBrowsing } from './server/safeBrowsing';
 import { computeRiskAnalysis } from './server/riskEngine';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-const CONSUMER_MODES = new Set(['link', 'message', 'screenshot_qr', 'call', 'account', 'threat', 'recovery']);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -47,17 +47,13 @@ function rateLimitMiddleware(req: Request, res: Response, next: () => void) {
   next();
 }
 
-function normalizeConsumerMode(value: unknown): string {
-  const mode = String(value || '').trim();
-  return CONSUMER_MODES.has(mode) ? mode : 'message';
-}
-
 app.get('/api/health', (_req: Request, res: Response) => {
   const stats = getRegistryStats();
 
   res.json({
     status: 'ok',
     analysisMode: 'gemini-only',
+    inputRouting: 'gemini-auto-detect',
     promptStrategy: 'evidence-first-v2',
     geminiConfigured: Boolean(String(process.env.GEMINI_API_KEY || '').trim()),
     model: process.env.GEMINI_MODEL || 'auto',
@@ -71,8 +67,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 app.post('/api/analyze', rateLimitMiddleware, async (req: Request, res: Response) => {
   try {
-    const { text = '', imageBase64, mimeType, mode } = req.body;
-    const consumerMode = normalizeConsumerMode(mode);
+    const { text = '', imageBase64, mimeType } = req.body;
 
     if (!text && !imageBase64) {
       res.status(400).json({
@@ -81,10 +76,12 @@ app.post('/api/analyze', rateLimitMiddleware, async (req: Request, res: Response
       return;
     }
 
-    // Stage 1: Gemini MUST understand the supplied text/image first.
-    // The selected consumer mode is part of the context so Gemini knows
-    // whether the user is checking a link, message, screenshot, call, account, etc.
-    // There is intentionally no local fallback path.
+    // Stage 0: Gemini automatically detects the input context. The user does
+    // not need to choose a category before analysis.
+    const consumerMode = await detectConsumerModeWithGemini(text, imageBase64, mimeType);
+
+    // Stage 1: Gemini understands the supplied text/image using the detected
+    // context. There is intentionally no local response fallback path.
     const extractedSignals = await extractSignalsFromInput(
       text,
       imageBase64,
@@ -93,7 +90,7 @@ app.post('/api/analyze', rateLimitMiddleware, async (req: Request, res: Response
     );
 
     // Stage 2: local services only produce machine-readable verification signals.
-    // They do not write consumer-facing explanations or recommendations.
+    // They never write the consumer-facing answer.
     const safeBrowsingStatus = await checkSafeBrowsing(extractedSignals.extractedUrls);
     const technicalResult = computeRiskAnalysis(
       extractedSignals,
@@ -105,8 +102,8 @@ app.post('/api/analyze', rateLimitMiddleware, async (req: Request, res: Response
     let responseResult = technicalResult;
 
     try {
-      // Stage 3: Gemini writes the complete final response after seeing
-      // both its first-pass understanding and the technical verification signals.
+      // Stage 3: Gemini writes the final consumer answer after seeing both its
+      // contextual understanding and the technical verification signals.
       const finalAi = await generateFinalConsumerResponse({
         originalText: text,
         mode: consumerMode,
@@ -149,8 +146,7 @@ app.post('/api/analyze', rateLimitMiddleware, async (req: Request, res: Response
       };
     } catch (finalError: any) {
       // The first Gemini pass already succeeded. If the refinement pass is
-      // temporarily unavailable, use ONLY the first Gemini-generated copy.
-      // Never manufacture a local answer.
+      // temporarily unavailable, use only the first Gemini-generated copy.
       console.warn('[Gemini AI] Final response refinement unavailable; using Gemini first-pass copy only:', finalError?.message || finalError);
 
       responseResult = {
@@ -209,7 +205,8 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Khoan Đã! Server running on http://0.0.0.0:${PORT}`);
     console.log(`Analysis mode: Gemini only (${process.env.GEMINI_MODEL || 'automatic model selection'})`);
-    console.log('Prompt strategy: evidence-first-v2 with mode context and few-shot controls');
+    console.log('Input routing: Gemini auto-detect');
+    console.log('Prompt strategy: evidence-first-v2 with few-shot controls');
   });
 }
 
