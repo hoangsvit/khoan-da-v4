@@ -43,7 +43,6 @@ export interface ExtractedSignals {
     threatOrExtortion?: boolean;
   };
   rawSummary: string;
-  // 100% AI Analysis Fields
   scamCategory?: string;
   aiDetailedReasoning?: string;
   aiRiskLevel?: RiskLevel;
@@ -52,7 +51,7 @@ export interface ExtractedSignals {
   aiRiskScoreDescription?: string;
   aiReasons?: string[];
   aiActionSteps?: string[];
-  analysisEngine?: 'GEMINI_AI_100' | 'LOCAL_FALLBACK';
+  analysisEngine?: 'GEMINI_AI_100';
 }
 
 export interface SafeBrowsingResult {
@@ -85,10 +84,9 @@ export interface RiskAnalysisResult {
   urlCheckSignals: URLCheckSignal[];
   extractedSignals: ExtractedSignals;
   disclaimer: string;
-  // 100% AI Indicators
   scamCategory?: string;
   aiDetailedReasoning?: string;
-  analysisEngine: 'GEMINI_AI_100' | 'LOCAL_FALLBACK';
+  analysisEngine: 'GEMINI_AI_100';
 }
 
 export interface RegistryStats {
