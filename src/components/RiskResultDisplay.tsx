@@ -1,336 +1,267 @@
 import React, { useState } from 'react';
-import { RiskAnalysisResult } from '../types';
-import { OctagonX, AlertTriangle, ShieldCheck, CheckCircle2, ShieldAlert, Copy, Check, ExternalLink, Globe, AlertCircle, Phone, Lock, Eye, CreditCard, FileText, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Copy,
+  CreditCard,
+  Eye,
+  Globe2,
+  Info,
+  LockKeyhole,
+  OctagonAlert,
+  ShieldCheck,
+  Sparkles
+} from 'lucide-react';
 import { motion } from 'motion/react';
+import { RiskAnalysisResult } from '../types';
 
 interface RiskResultDisplayProps {
   result: RiskAnalysisResult;
 }
 
+const safetyTips = [
+  'Không chia sẻ OTP, mật khẩu hoặc mã xác thực cho người khác.',
+  'Tự mở app hoặc website chính thức thay vì bấm link được gửi đến.',
+  'Khoan chuyển tiền khi người gửi thúc ép hoặc yêu cầu giữ bí mật.',
+  'Không cài APK hay ứng dụng điều khiển từ xa theo hướng dẫn của người lạ.'
+];
+
 export const RiskResultDisplay: React.FC<RiskResultDisplayProps> = ({ result }) => {
   const [copiedReport, setCopiedReport] = useState(false);
-  const [copiedAccount, setCopiedAccount] = useState(false);
-  const [showAiReasoning, setShowAiReasoning] = useState(true);
 
-  const getBadgeStyle = () => {
+  const theme = (() => {
     switch (result.riskLevel) {
       case 'STOP':
         return {
-          bg: 'bg-red-50/90 border-red-300 text-red-950',
-          titleColor: 'text-red-900',
-          subtitleColor: 'text-red-800',
-          icon: <OctagonX className="w-10 h-10 text-red-600 shrink-0" />,
-          tagBg: 'bg-red-600 text-white'
+          label: 'Rủi ro cao',
+          badge: 'bg-rose-100 text-rose-700',
+          ring: 'bg-rose-50 text-rose-600 ring-rose-100',
+          heading: 'text-rose-900',
+          icon: <OctagonAlert className="h-7 w-7" />
         };
       case 'CAUTION':
         return {
-          bg: 'bg-amber-50/90 border-amber-300 text-amber-950',
-          titleColor: 'text-amber-900',
-          subtitleColor: 'text-amber-800',
-          icon: <AlertTriangle className="w-10 h-10 text-amber-600 shrink-0" />,
-          tagBg: 'bg-amber-500 text-slate-950'
+          label: 'Cần thận trọng',
+          badge: 'bg-amber-100 text-amber-700',
+          ring: 'bg-amber-50 text-amber-600 ring-amber-100',
+          heading: 'text-amber-900',
+          icon: <AlertTriangle className="h-7 w-7" />
         };
       case 'VERIFY':
         return {
-          bg: 'bg-yellow-50/90 border-yellow-300 text-yellow-950',
-          titleColor: 'text-yellow-900',
-          subtitleColor: 'text-yellow-800',
-          icon: <ShieldAlert className="w-10 h-10 text-yellow-600 shrink-0" />,
-          tagBg: 'bg-yellow-500 text-slate-950'
+          label: 'Cần xác minh',
+          badge: 'bg-indigo-100 text-indigo-700',
+          ring: 'bg-indigo-50 text-indigo-600 ring-indigo-100',
+          heading: 'text-indigo-900',
+          icon: <ShieldCheck className="h-7 w-7" />
         };
-      case 'NO_CLEAR_RISK':
       default:
         return {
-          bg: 'bg-emerald-50/90 border-emerald-300 text-emerald-950',
-          titleColor: 'text-emerald-900',
-          subtitleColor: 'text-emerald-800',
-          icon: <CheckCircle2 className="w-10 h-10 text-emerald-600 shrink-0" />,
-          tagBg: 'bg-emerald-600 text-white'
+          label: 'Chưa thấy dấu hiệu rõ ràng',
+          badge: 'bg-emerald-100 text-emerald-700',
+          ring: 'bg-emerald-50 text-emerald-600 ring-emerald-100',
+          heading: 'text-emerald-900',
+          icon: <CheckCircle2 className="h-7 w-7" />
         };
     }
-  };
-
-  const badgeStyle = getBadgeStyle();
+  })();
 
   const handleCopyReport = () => {
-    const reportText = `[CẢNH BÁO BỞI KHOAN ĐÃ!]
-Mức độ: ${result.headlineTitle}
-Tóm tắt: ${result.headlineSubtitle}
-Lý do cảnh báo:
-${result.reasons.map((r, i) => `${i + 1}. ${r}`).join('\n')}
-
-Hành động khuyến nghị:
-${result.actionSteps.map((a, i) => `- ${a}`).join('\n')}
-
----
-Kiểm tra tại Khoan Đã! - Trợ lý phòng chống lừa đảo AI`;
-
+    const reportText = `Khoan Đã!\n${result.headlineTitle}\n${result.headlineSubtitle}\n\nVì sao cần chú ý:\n${result.reasons.map((reason, index) => `${index + 1}. ${reason}`).join('\n')}\n\nBạn nên làm gì:\n${result.actionSteps.map((action, index) => `${index + 1}. ${action}`).join('\n')}`;
     navigator.clipboard.writeText(reportText);
     setCopiedReport(true);
-    setTimeout(() => setCopiedReport(false), 2000);
+    window.setTimeout(() => setCopiedReport(false), 1800);
   };
 
-  const handleCopyAccount = (accountNum: string) => {
-    navigator.clipboard.writeText(accountNum);
-    setCopiedAccount(true);
-    setTimeout(() => setCopiedAccount(false), 2000);
-  };
+  const firstUrlSignal = result.urlCheckSignals?.[0];
+  const bank = result.extractedSignals?.bankAccountDetails;
+  const imageSummary = result.extractedSignals?.imageAnalysisSummary;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
+    <motion.section
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="space-y-5 text-slate-800"
+      transition={{ duration: 0.25 }}
+      className="space-y-4"
     >
-      {/* AI Engine Status Banner */}
-      <div className="p-3 bg-slate-900 text-white rounded-xl shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2 font-bold">
-          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>Hệ Thống Phân Tích:</span>
-          <span className="px-2.5 py-0.5 rounded-md bg-amber-400/20 border border-amber-400/40 text-amber-300 font-extrabold uppercase tracking-wide flex items-center gap-1">
-            ✨ Gemini Multimodal AI Engine
-          </span>
-        </div>
-        {result.scamCategory && (
-          <div className="px-3 py-1 bg-white/10 border border-white/15 rounded-lg text-slate-200 font-semibold text-[11px]">
-            Phân loại kịch bản: <strong className="text-white">{result.scamCategory}</strong>
-          </div>
-        )}
+      <div className="flex items-center gap-2 px-1">
+        <Sparkles className="h-4 w-4 text-indigo-500" />
+        <h2 className="text-sm font-extrabold text-slate-900">Kết quả phân tích</h2>
       </div>
 
-      {/* Main High-Visibility Headline Banner */}
-      <div className={`p-6 rounded-2xl border shadow-sm ${badgeStyle.bg} transition-all`}>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            {badgeStyle.icon}
-            <div>
-              <div className="flex items-center gap-2">
-                <span className={`px-2.5 py-0.5 rounded-md font-black text-xs uppercase tracking-wide ${badgeStyle.tagBg}`}>
-                  {result.riskLevel}
-                </span>
-                <span className="text-xs text-slate-700 font-bold">
-                  {result.riskScoreDescription}
-                </span>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
+        <div className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-[0_18px_55px_-40px_rgba(15,23,42,0.4)]">
+          <div className="border-b border-slate-100 p-5 sm:p-7">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 gap-4">
+                <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ring-8 ${theme.ring}`}>
+                  {theme.icon}
+                </div>
+                <div className="min-w-0">
+                  <span className={`inline-flex rounded-lg px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${theme.badge}`}>
+                    {theme.label}
+                  </span>
+                  <h3 className={`mt-2 text-xl font-black leading-tight tracking-tight sm:text-2xl ${theme.heading}`}>
+                    {result.headlineTitle}
+                  </h3>
+                  <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-500">{result.headlineSubtitle}</p>
+                </div>
               </div>
-              <h2 className={`text-2xl sm:text-3xl font-black mt-1.5 tracking-tight ${badgeStyle.titleColor}`}>
-                {result.headlineTitle}
-              </h2>
-              <p className={`text-sm font-medium mt-1 leading-relaxed ${badgeStyle.subtitleColor}`}>
-                {result.headlineSubtitle}
-              </p>
-            </div>
-          </div>
 
-          <button
-            onClick={handleCopyReport}
-            className="self-stretch sm:self-auto px-4 py-2.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 transition-all flex items-center justify-center gap-2 shrink-0 shadow-2xs active:scale-95 cursor-pointer"
-          >
-            {copiedReport ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-slate-600" />}
-            {copiedReport ? 'Đã sao chép Báo cáo!' : 'Sao chép Cảnh báo này'}
-          </button>
-        </div>
-      </div>
-
-      {/* Deep AI Reasoning Box */}
-      {result.aiDetailedReasoning && (
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-2xs overflow-hidden">
-          <button
-            onClick={() => setShowAiReasoning(!showAiReasoning)}
-            className="w-full p-4 bg-slate-50 hover:bg-slate-100/80 transition-colors flex items-center justify-between text-left cursor-pointer border-b border-slate-100"
-          >
-            <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider text-slate-800">
-              <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-              <span>Đánh giá chuyên sâu từ AI Gemini</span>
-            </div>
-            {showAiReasoning ? (
-              <ChevronUp className="w-4 h-4 text-slate-500" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-slate-500" />
-            )}
-          </button>
-          {showAiReasoning && (
-            <div className="p-5 text-xs sm:text-sm text-slate-800 leading-relaxed whitespace-pre-line font-normal">
-              {result.aiDetailedReasoning}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Brand / Domain Mismatch Alert Box */}
-      {result.detectedBrandMismatch && result.mismatchDetails && (
-        <div className="p-5 bg-red-50/90 border-2 border-red-300 rounded-2xl shadow-xs space-y-3">
-          <div className="flex items-center gap-2 text-red-900 font-extrabold text-sm uppercase tracking-wide">
-            <OctagonX className="w-5 h-5 text-red-600 shrink-0" />
-            CẢNH BÁO MẠO DANH THƯƠNG HIỆU NGÂN HÀNG / TỔ CHỨC
-          </div>
-
-          <p className="text-xs sm:text-sm text-red-950 leading-relaxed">
-            Nội dung tự xưng là thuộc về <strong>"{result.mismatchDetails.claimedEntity}"</strong>, nhưng liên kết yêu cầu truy cập <strong>"{result.mismatchDetails.providedDomain}"</strong> KHÔNG thuộc danh sách tên miền chính thức đã đăng ký!
-          </p>
-
-          <div className="p-3.5 bg-white border border-red-200 rounded-xl space-y-2 text-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-100 pb-2">
-              <span className="text-slate-500 font-medium">Tổ chức được xưng danh:</span>
-              <span className="font-bold text-red-800">{result.mismatchDetails.claimedEntity}</span>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-100 pb-2">
-              <span className="text-slate-500 font-medium">Tên miền giả mạo/nghi vấn:</span>
-              <span className="font-mono text-red-600 font-bold bg-red-50 px-2 py-0.5 border border-red-200 rounded">{result.mismatchDetails.providedDomain}</span>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-              <span className="text-slate-500 font-medium">Tên miền chính thức hợp pháp:</span>
-              <span className="font-mono text-emerald-700 font-bold flex items-center gap-1">
-                <Globe className="w-3.5 h-3.5" />
-                {result.mismatchDetails.officialDomains.join(', ')}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Multimodal AI Vision Image Analysis Result */}
-      {(result.extractedSignals?.hasImageAttached || result.extractedSignals?.imageAnalysisSummary || result.extractedSignals?.ocrTextExtracted) && (
-        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3.5 shadow-2xs">
-          <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
-            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-              <Eye className="w-4 h-4 text-blue-600 shrink-0" />
-              Kết quả Phân tích Hình ảnh AI Multimodal (OCR & Thị giác)
-            </h3>
-            <span className="px-2 py-0.5 bg-slate-900 text-white font-bold text-[10px] rounded uppercase">
-              Gemini Vision
-            </span>
-          </div>
-
-          {result.extractedSignals.imageAnalysisSummary && (
-            <p className="text-xs sm:text-sm font-semibold text-slate-800 leading-relaxed bg-white p-3.5 rounded-xl border border-slate-200">
-              {result.extractedSignals.imageAnalysisSummary}
-            </p>
-          )}
-
-          {result.extractedSignals.ocrTextExtracted && (
-            <div className="p-3.5 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto space-y-1">
-              <div className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1 mb-1">
-                <FileText className="w-3.5 h-3.5 text-blue-500" />
-                Văn bản trích xuất được từ ảnh (OCR):
-              </div>
-              <p className="text-slate-800 leading-relaxed font-sans">{result.extractedSignals.ocrTextExtracted}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Extracted Bank Account Information Card */}
-      {result.extractedSignals?.bankAccountDetails && (result.extractedSignals.bankAccountDetails.accountNumber || result.extractedSignals.bankAccountDetails.bankName) && (
-        <div className="p-4 bg-amber-50/80 border border-amber-200 rounded-2xl space-y-2.5 text-xs text-amber-950 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 font-bold text-amber-900 uppercase tracking-wider">
-              <CreditCard className="w-4 h-4 text-amber-700 shrink-0" />
-              Thông tin tài khoản ngân hàng trích xuất
-            </div>
-            {result.extractedSignals.bankAccountDetails.accountNumber && (
               <button
                 type="button"
-                onClick={() => handleCopyAccount(result.extractedSignals.bankAccountDetails.accountNumber!)}
-                className="flex items-center gap-1 text-[11px] font-bold bg-white px-2.5 py-1 border border-amber-300 rounded-lg text-amber-900 hover:bg-amber-100 transition-colors"
+                onClick={handleCopyReport}
+                className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
               >
-                {copiedAccount ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedAccount ? 'Đã chép STK' : 'Chép STK'}</span>
+                {copiedReport ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                {copiedReport ? 'Đã sao chép' : 'Sao chép'}
               </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3.5 bg-white border border-amber-200 rounded-xl">
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block">Ngân hàng:</span>
-              <span className="font-bold text-slate-800">{result.extractedSignals.bankAccountDetails.bankName || 'Chưa rõ'}</span>
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block">Số tài khoản:</span>
-              <span className="font-mono font-bold text-red-700">{result.extractedSignals.bankAccountDetails.accountNumber || 'Chưa rõ'}</span>
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block">Chủ tài khoản:</span>
-              <span className="font-bold text-slate-800">{result.extractedSignals.bankAccountDetails.accountHolder || 'Chưa rõ'}</span>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Reasons List */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3 shadow-2xs">
-        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-amber-600" />
-          Các tín hiệu rủi ro trích xuất được ({result.reasons.length})
-        </h3>
-
-        {result.reasons.length > 0 ? (
-          <ul className="space-y-2">
-            {result.reasons.map((reason, idx) => (
-              <li key={idx} className="flex items-start gap-3 text-xs sm:text-sm text-slate-800 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
-                <span className="w-5 h-5 rounded-md bg-red-100 text-red-700 border border-red-200 font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
-                  {idx + 1}
-                </span>
-                <span className="leading-relaxed font-medium">{reason}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-xs text-slate-400 italic">Không phát hiện tín hiệu nguy cơ nổi bật.</p>
-        )}
-      </div>
-
-      {/* Action Steps */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3 shadow-2xs">
-        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          Hành động bạn nên thực hiện ngay
-        </h3>
-
-        <div className="grid grid-cols-1 gap-2.5">
-          {result.actionSteps.map((step, idx) => (
-            <div key={idx} className="flex items-start gap-3 p-3.5 bg-emerald-50/50 border border-emerald-200/80 rounded-xl text-xs sm:text-sm text-slate-800">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <span className="font-semibold leading-relaxed">{step}</span>
+          <div className="divide-y divide-slate-100">
+            <div className="grid gap-4 p-5 sm:grid-cols-[44px_1fr] sm:p-7">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900">Điều đang xảy ra</h4>
+                <p className="mt-2 text-sm leading-7 text-slate-600">
+                  {result.aiDetailedReasoning || result.extractedSignals?.rawSummary || result.headlineSubtitle}
+                </p>
+                {result.scamCategory && (
+                  <span className="mt-3 inline-flex rounded-lg bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                    {result.scamCategory}
+                  </span>
+                )}
+                {imageSummary && (
+                  <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 text-xs leading-relaxed text-slate-600">
+                    <Eye className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
+                    <span>{imageSummary}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Safe Browsing Status Callout */}
-      <div className="p-4 bg-white border border-slate-200 rounded-2xl space-y-2 text-xs text-slate-700 shadow-2xs">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-          <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-            <Globe className="w-4 h-4 text-blue-600" />
-            Trạng thái tra cứu Google Safe Browsing v5
-          </span>
-          <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-            result.safeBrowsingStatus.hasMatch
-              ? 'bg-red-100 text-red-800 border border-red-200'
-              : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-          }`}>
-            {result.safeBrowsingStatus.checked
-              ? result.safeBrowsingStatus.hasMatch ? 'PHÁT HIỆN MÃ ĐỘC/LỪA ĐẢO' : 'KHÔNG CÓ TRONG BLACKLIST'
-              : 'TỰ ĐỘNG ĐỐI SOÁT'}
-          </span>
+            <div className="grid gap-4 p-5 sm:grid-cols-[44px_1fr] sm:p-7">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900">Vì sao cần chú ý</h4>
+                <ul className="mt-3 space-y-3">
+                  {result.reasons.map((reason, index) => (
+                    <li key={`${reason}-${index}`} className="flex items-start gap-2.5 text-sm leading-relaxed text-slate-600">
+                      <span className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                        <Check className="h-2.5 w-2.5" />
+                      </span>
+                      <span>{reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="grid gap-4 p-5 sm:grid-cols-[44px_1fr] sm:p-7">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900">Bạn nên làm gì ngay</h4>
+                <ol className="mt-3 space-y-3">
+                  {result.actionSteps.map((action, index) => (
+                    <li key={`${action}-${index}`} className="flex items-start gap-3 text-sm leading-relaxed text-slate-600">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-black text-emerald-700">
+                        {index + 1}
+                      </span>
+                      <span>{action}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          </div>
+
+          <div className="m-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 sm:m-7">
+            <div className="flex items-start gap-2.5">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
+              <p className="text-xs leading-relaxed text-indigo-900/75">{result.disclaimer}</p>
+            </div>
+          </div>
         </div>
 
-        <p className="text-[11px] text-slate-500 leading-relaxed italic">
-          {result.safeBrowsingStatus.disclaimer}
-        </p>
-      </div>
+        <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_14px_40px_-34px_rgba(15,23,42,0.35)]">
+            <h3 className="text-sm font-extrabold text-slate-900">Thông tin liên quan</h3>
+            <div className="mt-4 space-y-3">
+              {(result.detectedBrandMismatch && result.mismatchDetails) || firstUrlSignal ? (
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3.5">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    <Globe2 className="h-3.5 w-3.5" />Tên miền
+                  </div>
+                  <p className="mt-2 break-all text-xs font-bold text-slate-800">
+                    {result.mismatchDetails?.providedDomain || firstUrlSignal?.domain}
+                  </p>
+                  {result.detectedBrandMismatch && (
+                    <span className="mt-2 inline-flex rounded-md bg-rose-100 px-2 py-1 text-[10px] font-bold text-rose-700">Không khớp tên miền chính thức</span>
+                  )}
+                </div>
+              ) : null}
 
-      {/* Disclaimer Notice */}
-      <div className="p-4 bg-slate-900 rounded-xl text-[11px] text-slate-200 leading-relaxed flex items-center gap-3">
-        <div className="text-slate-400 shrink-0">
-          <AlertCircle className="w-5 h-5 text-amber-400" />
-        </div>
-        <div>
-          <strong className="font-bold text-white block">Quy tắc an toàn của Khoan Đã!:</strong>
-          {result.disclaimer}
-        </div>
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3.5">
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                  <ShieldCheck className="h-3.5 w-3.5" />Safe Browsing
+                </div>
+                <p className={`mt-2 text-xs font-bold ${result.safeBrowsingStatus.hasMatch ? 'text-rose-700' : 'text-slate-700'}`}>
+                  {result.safeBrowsingStatus.checked
+                    ? result.safeBrowsingStatus.hasMatch
+                      ? 'Có tín hiệu cảnh báo trong danh sách'
+                      : 'Chưa ghi nhận cảnh báo công khai'
+                    : 'Chưa thực hiện đối chiếu'}
+                </p>
+                {!result.safeBrowsingStatus.hasMatch && (
+                  <p className="mt-1 text-[10px] leading-relaxed text-slate-400">Không có cảnh báo không đồng nghĩa đường link chắc chắn an toàn.</p>
+                )}
+              </div>
+
+              {result.matchedInstitution && (
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3.5">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    <LockKeyhole className="h-3.5 w-3.5" />Tổ chức được nhắc tới
+                  </div>
+                  <p className="mt-2 text-xs font-bold text-slate-800">{result.matchedInstitution.name}</p>
+                </div>
+              )}
+
+              {bank && (bank.accountNumber || bank.bankName || bank.accountHolder) && (
+                <div className="rounded-2xl border border-amber-100 bg-amber-50/60 p-3.5">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-amber-600/70">
+                    <CreditCard className="h-3.5 w-3.5" />Tài khoản nhận tiền
+                  </div>
+                  <div className="mt-2 space-y-1 text-xs text-slate-700">
+                    {bank.bankName && <p><span className="text-slate-400">Ngân hàng:</span> <strong>{bank.bankName}</strong></p>}
+                    {bank.accountNumber && <p><span className="text-slate-400">Số tài khoản:</span> <strong className="font-mono">{bank.accountNumber}</strong></p>}
+                    {bank.accountHolder && <p><span className="text-slate-400">Người nhận:</span> <strong>{bank.accountHolder}</strong></p>}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_14px_40px_-34px_rgba(15,23,42,0.35)]">
+            <h3 className="text-sm font-extrabold text-slate-900">Mẹo an toàn</h3>
+            <ul className="mt-4 space-y-3">
+              {safetyTips.map((tip, index) => (
+                <li key={tip} className="flex items-start gap-2.5 text-[11px] leading-relaxed text-slate-600">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-[10px] font-black text-indigo-600">{index + 1}</span>
+                  <span>{tip}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </aside>
       </div>
-    </motion.div>
+    </motion.section>
   );
 };
-
