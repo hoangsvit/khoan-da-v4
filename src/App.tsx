@@ -1,25 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { ConsumerMode, RiskAnalysisResult, RegistryStats } from './types';
-import { Header } from './components/Header';
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 import { AnalysisForm } from './components/AnalysisForm';
-import { RiskResultDisplay } from './components/RiskResultDisplay';
-import { RecoveryModule } from './components/RecoveryModule';
 import { DemoPresetButtons } from './components/DemoPresetButtons';
+import { Header } from './components/Header';
+import { RecoveryModule } from './components/RecoveryModule';
 import { RegistryInfoModal } from './components/RegistryInfoModal';
-import { ShieldCheck, AlertCircle, Sparkles } from 'lucide-react';
+import { RiskResultDisplay } from './components/RiskResultDisplay';
+import { ConsumerMode, RegistryStats, RiskAnalysisResult } from './types';
 
 export default function App() {
-  const [currentMode, setCurrentMode] = useState<ConsumerMode>('link');
+  const [view, setView] = useState<'check' | 'recovery'>('check');
   const [analysisResult, setAnalysisResult] = useState<RiskAnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [registryStats, setRegistryStats] = useState<RegistryStats | undefined>(undefined);
   const [isRegistryModalOpen, setIsRegistryModalOpen] = useState(false);
+  const [isTestPanelOpen, setIsTestPanelOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Fetch health stats from backend
   useEffect(() => {
     fetch('/api/health')
-      .then(res => res.json())
+      .then(response => response.json())
       .then(data => {
         if (data.status === 'ok') {
           setRegistryStats({
@@ -31,7 +31,9 @@ export default function App() {
           });
         }
       })
-      .catch(err => console.warn('Could not fetch health endpoint:', err));
+      .catch(() => {
+        // Health metadata is optional for the consumer UI.
+      });
   }, []);
 
   const handleAnalyze = async (text: string, imageBase64?: string, mimeType?: string) => {
@@ -47,98 +49,135 @@ export default function App() {
           text,
           imageBase64,
           mimeType,
-          mode: currentMode
+          // The public experience is intentionally automatic. The user no
+          // longer needs to classify the situation before Gemini sees it.
+          mode: 'auto'
         })
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'Có lỗi xảy ra trong quá trình kết nối.');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Không thể hoàn tất kiểm tra lúc này.');
       }
 
       const resultData: RiskAnalysisResult = await response.json();
       setAnalysisResult(resultData);
-    } catch (err: any) {
-      console.error('Analysis failed:', err);
-      setErrorMsg(err.message || 'Không thể thực hiện phân tích lúc này. Vui lòng kiểm tra lại đường truyền.');
+    } catch (error: any) {
+      setErrorMsg(error?.message || 'Không thể thực hiện phân tích lúc này. Vui lòng thử lại.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSelectPreset = (mode: ConsumerMode, text: string) => {
-    setCurrentMode(mode);
-    setAnalysisResult(null);
+  const handleSelectPreset = (_mode: ConsumerMode, text: string) => {
+    setIsTestPanelOpen(false);
+    setView('check');
     setErrorMsg(null);
-    handleAnalyze(text);
+    setAnalysisResult(null);
+    void handleAnalyze(text);
   };
 
-  const handleClear = () => {
+  const handleBackToCheck = () => {
+    setView('check');
+    setErrorMsg(null);
+  };
+
+  const handleOpenRecovery = () => {
+    setView('recovery');
     setAnalysisResult(null);
     setErrorMsg(null);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-red-600 selection:text-white flex flex-col antialiased">
-      {/* Header */}
+    <div className="flex min-h-screen flex-col bg-slate-50 font-sans text-slate-900 antialiased selection:bg-emerald-600 selection:text-white">
       <Header
-        currentMode={currentMode}
-        onSelectMode={(mode) => {
-          setCurrentMode(mode);
-          setAnalysisResult(null);
-          setErrorMsg(null);
-        }}
+        isRecovery={view === 'recovery'}
         registryStats={registryStats}
         onOpenRegistryModal={() => setIsRegistryModalOpen(true)}
+        onOpenTestScenarios={() => setIsTestPanelOpen(true)}
+        onOpenRecovery={handleOpenRecovery}
+        onBackToCheck={handleBackToCheck}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Demo Preset Scenarios Bar */}
-        <DemoPresetButtons onSelectPreset={handleSelectPreset} />
-
-        {/* Dynamic Mode Render */}
-        {currentMode === 'recovery' ? (
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-7 sm:px-6 sm:py-10">
+        {view === 'recovery' ? (
           <RecoveryModule />
         ) : (
           <div className="space-y-6">
+            <section className="mx-auto max-w-3xl text-center">
+              <div className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Gemini tự nhận diện loại tình huống
+              </div>
+              <h2 className="text-2xl font-extrabold tracking-tight text-slate-950 sm:text-3xl">
+                Dừng một nhịp trước khi làm theo.
+              </h2>
+              <p className="mx-auto mt-2 max-w-2xl text-sm leading-relaxed text-slate-500">
+                Không cần chọn đây là link, tin nhắn hay cuộc gọi. Chỉ cần gửi nội dung bạn nhận được; hệ thống sẽ đọc ngữ cảnh trước rồi mới đối chiếu các dấu hiệu kỹ thuật.
+              </p>
+            </section>
+
             <AnalysisForm
-              currentMode={currentMode}
               onAnalyze={handleAnalyze}
               isLoading={isLoading}
-              onClear={handleClear}
+              onClear={() => {
+                setAnalysisResult(null);
+                setErrorMsg(null);
+              }}
             />
 
             {errorMsg && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-900 text-xs sm:text-sm flex items-center gap-2.5">
-                <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
-                <span className="font-medium">{errorMsg}</span>
+              <div className="flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                <div>
+                  <p className="font-bold">Chưa thể hoàn tất kiểm tra</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-red-800">{errorMsg}</p>
+                </div>
               </div>
             )}
 
-            {analysisResult && (
-              <RiskResultDisplay result={analysisResult} />
-            )}
+            {analysisResult && <RiskResultDisplay result={analysisResult} />}
           </div>
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 text-slate-500 py-6 text-xs text-center shadow-xs mt-8">
-        <div className="max-w-6xl mx-auto px-4 space-y-2">
-          <p className="font-bold text-slate-800">
-            Khoan Đã! — Trợ lý AI Kiểm Tra Dấu Hiệu Lừa Đảo Cho Người Dùng Việt Nam
+      <footer className="border-t border-slate-200 bg-white py-6 text-center">
+        <div className="mx-auto max-w-4xl px-4">
+          <p className="text-xs font-semibold text-slate-700">
+            Khoan Đã! — Kiểm tra trước khi bạn hành động.
           </p>
-          <p className="text-[11px] text-slate-500">
-            Kết hợp Gemini Multimodal Structured Output, Rule Engine Đối soát Ngân hàng SBV & Google Safe Browsing API.
-          </p>
-          <p className="text-[10px] text-slate-400 italic">
-            Lưu ý: Công cụ hỗ trợ trích xuất tín hiệu nguy cơ để bạn chủ động phòng tránh. Không cố đưa ra kết luận an toàn tuyệt đối.
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+            Kết quả giúp nhận diện dấu hiệu cần chú ý và không phải là bảo đảm tuyệt đối về mức độ an toàn.
           </p>
         </div>
       </footer>
 
-      {/* Registry Transparency Modal */}
+      {isTestPanelOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6">
+          <div className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-t-3xl bg-slate-50 shadow-2xl sm:rounded-3xl">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur-md sm:px-6">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-950">Kịch bản thử nghiệm</h3>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Chỉ dùng khi bạn muốn kiểm tra prompt và hành vi của Gemini.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTestPanelOpen(false)}
+                className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                aria-label="Đóng kịch bản thử nghiệm"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-4 sm:p-6">
+              <DemoPresetButtons onSelectPreset={handleSelectPreset} />
+            </div>
+          </div>
+        </div>
+      )}
+
       <RegistryInfoModal
         isOpen={isRegistryModalOpen}
         onClose={() => setIsRegistryModalOpen(false)}
