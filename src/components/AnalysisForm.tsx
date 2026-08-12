@@ -1,23 +1,37 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 import jsQR from 'jsqr';
-import { ConsumerMode } from '../types';
-import { SAMPLE_PROMPTS, getRandomSamplePrompt } from '../data/samplePrompts';
-import { Search, Upload, X, QrCode, AlertCircle, Loader2, Sparkles, RefreshCw, Dices, Clipboard, Check } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { Check, ImagePlus, Loader2, QrCode, RefreshCw, Search, ShieldCheck, Upload, X } from 'lucide-react';
+import { motion } from 'motion/react';
 
 interface AnalysisFormProps {
-  currentMode: ConsumerMode;
   onAnalyze: (text: string, imageBase64?: string, mimeType?: string) => Promise<void>;
   isLoading: boolean;
   onClear: () => void;
 }
 
-export const AnalysisForm: React.FC<AnalysisFormProps> = ({
-  currentMode,
-  onAnalyze,
-  isLoading,
-  onClear
-}) => {
+const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 2200;
+const MAX_DATA_URL_LENGTH = 7_000_000;
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Không thể đọc tệp ảnh.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Không thể mở ảnh đã chọn.'));
+    image.src = dataUrl;
+  });
+}
+
+export const AnalysisForm: React.FC<AnalysisFormProps> = ({ onAnalyze, isLoading, onClear }) => {
   const [inputText, setInputText] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -25,111 +39,105 @@ export const AnalysisForm: React.FC<AnalysisFormProps> = ({
   const [qrDecodedText, setQrDecodedText] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+  const [imagePreparing, setImagePreparing] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Suggestions filtered by mode
-  const modeSuggestions = SAMPLE_PROMPTS.filter(p => p.mode === currentMode);
-  const displayedSuggestions = modeSuggestions.length > 0 ? modeSuggestions.slice(0, 3) : SAMPLE_PROMPTS.slice(0, 3);
-
-  const handleRandomInsert = () => {
-    const random = getRandomSamplePrompt(inputText);
-    setInputText(random.text);
+  const showNotice = (message: string) => {
+    setPasteNotice(message);
+    window.setTimeout(() => setPasteNotice(null), 3200);
   };
 
-  const getModePlaceholder = () => {
-    switch (currentMode) {
-      case 'link':
-        return 'Dán đường dẫn trang web (URL) hoặc địa chỉ lạ bạn nhận được vào đây...\nVí dụ: http://vietcombank-dinhdanh-online.com/xacthuc';
-      case 'message':
-        return 'Dán toàn bộ nội dung tin nhắn SMS, Zalo, Messenger hoặc email nghi vấn vào đây...\nVí dụ: "Vietcombank thong bao: TK ban bi khoa trong 2h. Vui long truy cap http://vcb-auth.com de xac thuc ngay."';
-      case 'screenshot_qr':
-        return 'Tải lên hoặc dán (Ctrl+V) ảnh chụp màn hình tin nhắn, mã QR, hóa đơn chuyển khoản hoặc thông báo nghi ngờ...';
-      case 'call':
-        return 'Mô tả nội dung cuộc gọi xưng danh công an, ngân hàng, viện kiểm sát, tổng cục thuế hoặc người lạ yêu cầu thao tác...';
-      case 'account':
-        return 'Nhập thông tin tài khoản nhận tiền (Tên ngân hàng, Số tài khoản, Tên chủ tài khoản) hoặc lý do bị yêu cầu chuyển tiền...';
-      case 'threat':
-        return 'Dán tin nhắn đe dọa, đòi nợ bôi nhọ, uy hiếp công việc/người thân hoặc tải ảnh màn hình tin nhắn SMS/Zalo/FB...\nVí dụ: "NGƯỜI THÂN GIA ĐÌNH CỦA A LÔI ĐẦU NÓ RA ĐÂY GIẢI QUYẾT GẤP ĐỪNG ĐỂ ĐẾN CÔNG VIỆC..."';
-      default:
-        return 'Dán tin nhắn, đường dẫn URL hoặc mô tả tình huống để kiểm tra ngay...';
-    }
-  };
-
-  // Decode QR code using canvas and jsQR
-  const decodeQrFromImage = (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setPasteNotice('Vui lòng chọn định dạng tệp hình ảnh (PNG, JPEG, WebP).');
-      setTimeout(() => setPasteNotice(null), 3000);
+  const processImageFile = async (file: File) => {
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      showNotice('Vui lòng chọn ảnh PNG, JPEG hoặc WebP.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      setImagePreview(dataUrl);
-      setImageBase64(dataUrl);
-      setImageMimeType(file.type);
-      setPasteNotice('Đã tải hình ảnh thành công!');
-      setTimeout(() => setPasteNotice(null), 3000);
+    if (file.size > MAX_SOURCE_BYTES) {
+      showNotice('Ảnh quá lớn. Vui lòng chọn ảnh dưới 15 MB.');
+      return;
+    }
 
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+    setImagePreparing(true);
 
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0, img.width, img.height);
+    try {
+      const originalDataUrl = await readFileAsDataUrl(file);
+      const image = await loadImage(originalDataUrl);
+      const longestSide = Math.max(image.naturalWidth, image.naturalHeight);
+      const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(longestSide, 1));
 
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
 
-        if (code && code.data) {
-          setQrDecodedText(code.data);
-          setInputText(prev => {
-            if (prev.includes(code.data)) return prev;
-            return prev ? `${prev}\n[Mã QR giải mã được: ${code.data}]` : `[Mã QR giải mã được: ${code.data}]`;
-          });
-        } else {
-          setQrDecodedText(null);
-        }
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
-  };
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('Trình duyệt không thể xử lý ảnh này.');
 
-  // Handle Ctrl+V / Cmd+V paste image directly
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
-        const file = items[i].getAsFile();
-        if (file) {
-          e.preventDefault();
-          decodeQrFromImage(file);
-          break;
-        }
+      // Keep screenshot text/QR sharp when possible. Only switch to JPEG if the
+      // request would become too large for the backend JSON body.
+      let preparedDataUrl = canvas.toDataURL('image/png');
+      if (preparedDataUrl.length > MAX_DATA_URL_LENGTH) {
+        preparedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
       }
+      if (preparedDataUrl.length > MAX_DATA_URL_LENGTH) {
+        preparedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      }
+
+      if (preparedDataUrl.length > MAX_DATA_URL_LENGTH) {
+        throw new Error('Ảnh vẫn quá lớn sau khi tối ưu. Hãy thử ảnh có độ phân giải thấp hơn.');
+      }
+
+      const preparedMime = preparedDataUrl.match(/^data:([^;]+);base64,/)?.[1] || 'image/jpeg';
+
+      setImagePreview(preparedDataUrl);
+      setImageBase64(preparedDataUrl);
+      setImageMimeType(preparedMime);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const qr = jsQR(imageData.data, imageData.width, imageData.height);
+
+      if (qr?.data) {
+        setQrDecodedText(qr.data);
+        setInputText(previous => {
+          if (previous.includes(qr.data)) return previous;
+          const qrContext = `[Nội dung QR đọc được: ${qr.data}]`;
+          return previous.trim() ? `${previous.trim()}\n${qrContext}` : qrContext;
+        });
+        showNotice('Đã nhận ảnh và đọc được nội dung QR.');
+      } else {
+        setQrDecodedText(null);
+        showNotice('Ảnh đã sẵn sàng để Gemini phân tích.');
+      }
+    } catch (error: any) {
+      showNotice(error?.message || 'Không thể chuẩn bị ảnh. Vui lòng thử ảnh khác.');
+    } finally {
+      setImagePreparing(false);
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      decodeQrFromImage(e.target.files[0]);
+  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const imageItem = Array.from(event.clipboardData?.items || []).find(item => item.type.startsWith('image/'));
+    const file = imageItem?.getAsFile();
+
+    if (file) {
+      event.preventDefault();
+      void processImageFile(file);
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) void processImageFile(file);
+  };
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      decodeQrFromImage(e.dataTransfer.files[0]);
-    }
+    const file = event.dataTransfer.files?.[0];
+    if (file) void processImageFile(file);
   };
 
   const handleRemoveImage = () => {
@@ -140,10 +148,10 @@ export const AnalysisForm: React.FC<AnalysisFormProps> = ({
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
     if (!inputText.trim() && !imageBase64) return;
-    onAnalyze(inputText, imageBase64 || undefined, imageMimeType || undefined);
+    void onAnalyze(inputText.trim(), imageBase64 || undefined, imageMimeType || undefined);
   };
 
   const handleClearAll = () => {
@@ -153,180 +161,148 @@ export const AnalysisForm: React.FC<AnalysisFormProps> = ({
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden p-5 sm:p-6 text-slate-800 transition-all">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Input Text Area */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-              <span>Nội dung tin nhắn, URL hoặc mô tả tình huống</span>
-            </label>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-400 font-medium">
-                Dán ảnh bằng Ctrl+V / Cmd+V
-              </span>
-              {inputText && (
-                <span className="text-[11px] text-slate-500 font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                  {inputText.length} ký tự
-                </span>
-              )}
-            </div>
+    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_18px_60px_-38px_rgba(15,23,42,0.35)]">
+      <div className="border-b border-slate-100 px-5 py-5 sm:px-7">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+            <ShieldCheck className="h-4.5 w-4.5" />
           </div>
-
-          <div className="relative">
-            <textarea
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onPaste={handlePaste}
-              placeholder={getModePlaceholder()}
-              rows={4}
-              className="w-full bg-slate-50/80 border border-slate-200 focus:border-slate-400 focus:ring-2 focus:ring-slate-300/50 focus:bg-white rounded-xl p-4 text-sm text-slate-800 placeholder-slate-400 transition-all resize-y min-h-[115px] leading-relaxed"
-            />
-            {pasteNotice && (
-              <motion.div
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="absolute top-3 right-3 bg-slate-900 text-white text-xs px-2.5 py-1 rounded-lg shadow-md flex items-center gap-1.5 font-medium z-10"
-              >
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                {pasteNotice}
-              </motion.div>
-            )}
-          </div>
-
-          {/* Quick Suggestion Chips & Random Button */}
-          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-amber-500" /> Gợi ý nhanh:
-              </span>
-              {displayedSuggestions.map(sugg => (
-                <button
-                  key={sugg.id}
-                  type="button"
-                  onClick={() => setInputText(sugg.text)}
-                  className="px-2.5 py-1 bg-slate-100/80 hover:bg-slate-200/80 active:scale-95 text-slate-700 rounded-lg text-xs font-medium transition-all border border-slate-200/80 text-left truncate max-w-[220px]"
-                  title={sugg.text}
-                >
-                  {sugg.label}
-                </button>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleRandomInsert}
-              className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-900 border border-amber-200 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer shadow-2xs"
-            >
-              <Dices className="w-3.5 h-3.5 text-amber-600" />
-              <span>🎲 Kịch bản ngẫu nhiên</span>
-            </button>
+          <div>
+            <h2 className="text-base font-extrabold tracking-tight text-slate-950 sm:text-lg">
+              Bạn muốn kiểm tra điều gì?
+            </h2>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500 sm:text-sm">
+              Dán nội dung hoặc tải ảnh lên. Gemini sẽ tự nhận diện đây là tin nhắn, đường link, cuộc gọi, QR, yêu cầu chuyển tiền hay tình huống khác.
+            </p>
           </div>
         </div>
+      </div>
 
-        {/* QR & Image Upload Section */}
+      <form onSubmit={handleSubmit} className="space-y-5 p-5 sm:p-7">
+        <div className="relative">
+          <textarea
+            value={inputText}
+            onChange={event => setInputText(event.target.value)}
+            onPaste={handlePaste}
+            placeholder="Dán tin nhắn, URL, mô tả cuộc gọi, thông tin chuyển khoản... hoặc chỉ cần tải ảnh chụp màn hình bên dưới."
+            rows={6}
+            className="min-h-[150px] w-full resize-y rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm leading-relaxed text-slate-800 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100 placeholder:text-slate-400"
+          />
+
+          {pasteNotice && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="absolute right-3 top-3 flex max-w-[85%] items-center gap-1.5 rounded-lg bg-slate-950 px-2.5 py-1.5 text-[11px] font-medium text-white shadow-lg"
+            >
+              <Check className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+              {pasteNotice}
+            </motion.div>
+          )}
+        </div>
+
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-              <Upload className="w-3.5 h-3.5 text-slate-600" />
-              Đính kèm Ảnh màn hình / Mã QR (PNG, JPEG, WebP)
-            </span>
-            {qrDecodedText && (
-              <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1 bg-emerald-50 px-2.5 py-0.5 border border-emerald-200 rounded-md">
-                <QrCode className="w-3.5 h-3.5 text-emerald-600" /> Đã quét được QR Code!
-              </span>
-            )}
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <span className="text-xs font-bold text-slate-700">Ảnh chụp màn hình hoặc mã QR</span>
+            <span className="text-[11px] text-slate-400">PNG, JPEG, WebP · tối đa 15 MB</span>
           </div>
 
           {!imagePreview ? (
             <div
-              onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+              onDragOver={event => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
               onDragLeave={() => setDragActive(false)}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+              onClick={() => !imagePreparing && fileInputRef.current?.click()}
+              className={`cursor-pointer rounded-2xl border border-dashed p-5 transition ${
                 dragActive
-                  ? 'border-red-400 bg-red-50/60 shadow-sm'
-                  : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/80 bg-slate-50/40'
+                  ? 'border-emerald-400 bg-emerald-50'
+                  : 'border-slate-300 bg-slate-50/60 hover:border-slate-400 hover:bg-slate-50'
               }`}
             >
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png, image/jpeg, image/webp"
+                accept="image/png,image/jpeg,image/webp"
                 onChange={handleFileChange}
                 className="hidden"
               />
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                <div className="p-2.5 bg-white border border-slate-200 rounded-xl shadow-2xs text-slate-600">
-                  <Upload className="w-5 h-5 text-slate-700" />
+
+              <div className="flex flex-col items-center justify-center gap-3 text-center sm:flex-row sm:text-left">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm">
+                  {imagePreparing ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
                 </div>
-                <div className="text-center sm:text-left">
-                  <p className="text-xs text-slate-800 font-bold">
-                    Nhấp để chọn ảnh, kéo thả hoặc dán trực tiếp (Ctrl+V)
+                <div>
+                  <p className="text-xs font-bold text-slate-800">
+                    {imagePreparing ? 'Đang chuẩn bị ảnh…' : 'Chọn ảnh, kéo thả hoặc dán từ clipboard'}
                   </p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Tự động nhận diện mã QR & Gemini Multimodal OCR trích xuất thông tin
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+                    Ảnh sẽ được tối ưu ngay trên thiết bị trước khi gửi để Gemini đọc nội dung.
                   </p>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="relative bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center gap-4">
+            <div className="flex items-center gap-4 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-3.5">
               <img
                 src={imagePreview}
-                alt="Upload preview"
-                className="w-16 h-16 object-cover rounded-lg border border-slate-200 shrink-0 shadow-2xs"
+                alt="Ảnh đã chọn"
+                className="h-20 w-20 shrink-0 rounded-xl border border-white object-cover shadow-sm"
               />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-slate-800 truncate">Ảnh đính kèm đã sẵn sàng phân tích</p>
-                {qrDecodedText ? (
-                  <p className="text-xs text-emerald-700 truncate mt-0.5">
-                    Mã QR giải mã: <span className="font-mono bg-white px-1.5 py-0.5 border border-slate-200 rounded text-[11px] font-bold">{qrDecodedText}</span>
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-slate-500 mt-0.5">Gemini Vision AI sẽ đọc toàn bộ văn bản và dấu hiệu bất thường trên hình ảnh này</p>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-900">
+                  <Upload className="h-3.5 w-3.5" />
+                  Ảnh đã sẵn sàng
+                </div>
+                <p className="mt-1 text-[11px] leading-relaxed text-emerald-800/80">
+                  Gemini sẽ đọc chữ, URL, tên tổ chức, yêu cầu hành động và các dấu hiệu có trong ảnh.
+                </p>
+                {qrDecodedText && (
+                  <div className="mt-2 flex items-center gap-1.5 truncate text-[11px] font-semibold text-emerald-800">
+                    <QrCode className="h-3.5 w-3.5 shrink-0" />
+                    QR: <span className="truncate font-mono">{qrDecodedText}</span>
+                  </div>
                 )}
               </div>
               <button
                 type="button"
                 onClick={handleRemoveImage}
-                className="p-1.5 text-slate-500 hover:text-red-700 bg-white hover:bg-red-50 border border-slate-200 hover:border-red-200 rounded-lg transition-colors cursor-pointer"
+                className="rounded-lg border border-emerald-200 bg-white p-2 text-slate-500 transition hover:text-red-600"
                 title="Xóa ảnh"
               >
-                <X className="w-4 h-4" />
+                <X className="h-4 w-4" />
               </button>
             </div>
           )}
         </div>
 
-        {/* Buttons Row */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+        <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
           <button
             type="button"
             onClick={handleClearAll}
             disabled={isLoading}
-            className="w-full sm:w-auto px-4 py-2.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+            className="flex items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Làm mới / Xóa nội dung
+            <RefreshCw className="h-3.5 w-3.5" />
+            Xóa nội dung
           </button>
 
           <button
             type="submit"
-            disabled={isLoading || (!inputText.trim() && !imageBase64)}
-            className="w-full sm:w-auto px-8 py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none text-white font-black text-xs sm:text-sm tracking-wide uppercase rounded-xl shadow-md transition-all flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+            disabled={isLoading || imagePreparing || (!inputText.trim() && !imageBase64)}
+            className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-7 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:pointer-events-none disabled:opacity-50"
           >
             {isLoading ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin text-white" />
-                Đang đối soát dữ liệu & phân tích...
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Gemini đang đọc và đối chiếu…
               </>
             ) : (
               <>
-                <Search className="w-4 h-4 text-amber-400" />
-                KIỂM TRA DẤU HIỆU LỪA ĐẢO
+                <Search className="h-4 w-4" />
+                Kiểm tra ngay
               </>
             )}
           </button>
@@ -335,4 +311,3 @@ export const AnalysisForm: React.FC<AnalysisFormProps> = ({
     </div>
   );
 };
-
