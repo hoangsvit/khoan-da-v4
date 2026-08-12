@@ -9,6 +9,7 @@ import { computeRiskAnalysis } from './server/riskEngine';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+const CONSUMER_MODES = new Set(['link', 'message', 'screenshot_qr', 'call', 'account', 'threat', 'recovery']);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -46,12 +47,18 @@ function rateLimitMiddleware(req: Request, res: Response, next: () => void) {
   next();
 }
 
+function normalizeConsumerMode(value: unknown): string {
+  const mode = String(value || '').trim();
+  return CONSUMER_MODES.has(mode) ? mode : 'message';
+}
+
 app.get('/api/health', (_req: Request, res: Response) => {
   const stats = getRegistryStats();
 
   res.json({
     status: 'ok',
     analysisMode: 'gemini-only',
+    promptStrategy: 'evidence-first-v2',
     geminiConfigured: Boolean(String(process.env.GEMINI_API_KEY || '').trim()),
     model: process.env.GEMINI_MODEL || 'auto',
     officialDomainEntities: stats.officialDomainEntities,
@@ -64,7 +71,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 app.post('/api/analyze', rateLimitMiddleware, async (req: Request, res: Response) => {
   try {
-    const { text = '', imageBase64, mimeType } = req.body;
+    const { text = '', imageBase64, mimeType, mode } = req.body;
+    const consumerMode = normalizeConsumerMode(mode);
 
     if (!text && !imageBase64) {
       res.status(400).json({
@@ -74,8 +82,15 @@ app.post('/api/analyze', rateLimitMiddleware, async (req: Request, res: Response
     }
 
     // Stage 1: Gemini MUST understand the supplied text/image first.
+    // The selected consumer mode is part of the context so Gemini knows
+    // whether the user is checking a link, message, screenshot, call, account, etc.
     // There is intentionally no local fallback path.
-    const extractedSignals = await extractSignalsFromInput(text, imageBase64, mimeType);
+    const extractedSignals = await extractSignalsFromInput(
+      text,
+      imageBase64,
+      mimeType,
+      consumerMode
+    );
 
     // Stage 2: local services only produce machine-readable verification signals.
     // They do not write consumer-facing explanations or recommendations.
@@ -94,6 +109,7 @@ app.post('/api/analyze', rateLimitMiddleware, async (req: Request, res: Response
       // both its first-pass understanding and the technical verification signals.
       const finalAi = await generateFinalConsumerResponse({
         originalText: text,
+        mode: consumerMode,
         extracted: extractedSignals,
         technicalAssessment: {
           minimumRiskLevel: technicalResult.riskLevel,
@@ -193,6 +209,7 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Khoan Đã! Server running on http://0.0.0.0:${PORT}`);
     console.log(`Analysis mode: Gemini only (${process.env.GEMINI_MODEL || 'automatic model selection'})`);
+    console.log('Prompt strategy: evidence-first-v2 with mode context and few-shot controls');
   });
 }
 
